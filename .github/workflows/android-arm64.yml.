@@ -1,0 +1,65 @@
+
+name: Android ARM64 native build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/android-arm64.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Brokkr for Android arm64-v8a
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Brokkr
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build git pkg-config
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK packages
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Build libusb for Android ARM64
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch v1.0.27 \
+            https://github.com/libusb/libusb.git libusb-src
+
+          cmake -S libusb-src -B libusb-build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DLIBUSB_BUILD_TESTING=OFF
+
+          cmake --build libusb-build --parallel
+
+      - name: Verify libusb output
+        run: |
+          set -euxo pipefail
+          find libusb-build -type f -name 'libusb-1.0.so' -print
+          find libusb-build -type f -name 'libusb-1.0.so' | grep .
+
+      - name: Upload libusb build for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: libusb-android-arm64
+          path: libusb-build/
+          if-no-files-found: error
