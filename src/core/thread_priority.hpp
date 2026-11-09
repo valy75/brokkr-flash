@@ -17,18 +17,34 @@
 
 #pragma once
 
-#if defined(BROKKR_PLATFORM_ANDROID)
+#if defined(BROKKR_PLATFORM_ANDROID) || defined(__linux__)
 #  include <sys/resource.h>
 #  include <sys/syscall.h>
 #  include <unistd.h>
+#elif defined(__APPLE__)
+#  include <pthread.h>
+#  include <sys/qos.h>
+#elif defined(_WIN32)
+#  include <windows.h>
 #endif
 
 namespace brokkr::core {
 
 inline void bump_thread_priority(int nice_value = -8) noexcept {
-#if defined(BROKKR_PLATFORM_ANDROID)
+#if defined(BROKKR_PLATFORM_ANDROID) || defined(__linux__)
   const pid_t tid = static_cast<pid_t>(::syscall(SYS_gettid));
   ::setpriority(PRIO_PROCESS, static_cast<id_t>(tid), nice_value);
+#elif defined(__APPLE__)
+  const int relative = nice_value + 8 >= 15 ? -15 : (nice_value + 8 <= 0 ? 0 : -(nice_value + 8));
+  (void)::pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, relative);
+#elif defined(_WIN32)
+  THREAD_POWER_THROTTLING_STATE state{};
+  state.Version = THREAD_POWER_THROTTLING_CURRENT_VERSION;
+  state.ControlMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+  state.StateMask = 0;
+  (void)::SetThreadInformation(::GetCurrentThread(), ThreadPowerThrottling, &state, sizeof state);
+  (void)::SetThreadPriority(::GetCurrentThread(),
+                           nice_value <= -8 ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_NORMAL);
 #else
   (void)nice_value;
 #endif

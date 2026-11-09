@@ -225,7 +225,11 @@ int TcpConnection::recv_(std::span<std::uint8_t> data) {
       spdlog::error("TcpConnection::recv: poll: {}", std::strerror(e));
       return -1;
     }
-    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+    if (pfd.revents & POLLNVAL) {
+      spdlog::warn("TcpConnection::recv: invalid socket");
+      return -1;
+    }
+    if ((pfd.revents & (POLLERR | POLLHUP)) && !(pfd.revents & POLLIN)) {
       spdlog::warn("TcpConnection::recv: peer closed");
       return -1;
     }

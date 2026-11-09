@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Brokkr LANGUAGES C CXX VERSION 2.4.12)
+project(Brokkr LANGUAGES C CXX VERSION 2.5.0)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -195,10 +195,13 @@ add_library(brokkr-lib INTERFACE)
 target_sources(brokkr-lib INTERFACE
     src/core/thread_pool.cpp
     src/io/random_access.cpp
+    src/io/sequential_reader.cpp
     src/io/tar.cpp
     src/io/source.cpp
     src/io/lz4_frame.cpp
     src/third_party/md5/md5.c
+    src/third_party/xxhash/xxhash.c
+    src/third_party/xxhash/xxhash_dispatch.c
     src/third_party/lz4/lz4.c
     src/protocol/odin/odin_cmd.cpp
     src/protocol/odin/pit.cpp
@@ -208,6 +211,13 @@ target_sources(brokkr-lib INTERFACE
     src/app/md5_xxh3_cache.cpp
     src/app/md5_verify.cpp
 )
+
+if (MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+    enable_language(ASM_MASM)
+    add_library(brokkr-md5-asm OBJECT src/third_party/md5/md5_x64.asm src/third_party/md5/md5_x64_avx512.asm)
+    target_sources(brokkr-lib INTERFACE $<TARGET_OBJECTS:brokkr-md5-asm>)
+    target_compile_definitions(brokkr-lib INTERFACE BROKKR_MD5_X64_ASM)
+endif()
 
 include(TestBigEndian)
 test_big_endian(BROKKR_IS_BIG_ENDIAN)
@@ -455,6 +465,10 @@ add_executable(test_md5
     src/third_party/md5/md5.c
 )
 target_include_directories(test_md5 PRIVATE src)
+if (TARGET brokkr-md5-asm)
+    target_sources(test_md5 PRIVATE $<TARGET_OBJECTS:brokkr-md5-asm>)
+    target_compile_definitions(test_md5 PRIVATE BROKKR_MD5_X64_ASM)
+endif()
 add_test(NAME md5 COMMAND test_md5)
 
 add_executable(test_md5_xxh3_cache
@@ -469,10 +483,29 @@ add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)
 add_test(NAME endian COMMAND test_endian)
 
+if (WIN32)
+    set(BROKKR_TEST_TCP_TRANSPORT src/platform/windows/tcp_transport.cpp)
+else()
+    set(BROKKR_TEST_TCP_TRANSPORT src/platform/posix-common/tcp_transport.cpp)
+endif()
+add_executable(test_tcp_recv_buffered
+    tests/test_tcp_recv_buffered.cpp
+    ${BROKKR_TEST_TCP_TRANSPORT}
+)
+target_include_directories(test_tcp_recv_buffered PRIVATE src)
+target_compile_definitions(test_tcp_recv_buffered PRIVATE
+    $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+)
+target_link_libraries(test_tcp_recv_buffered PRIVATE
+    Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only
+)
+add_test(NAME tcp_recv_buffered COMMAND test_tcp_recv_buffered)
+
 add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp
     src/io/random_access.cpp
+    src/io/sequential_reader.cpp
     src/io/source.cpp
     src/io/tar.cpp
     src/io/lz4_frame.cpp
@@ -481,9 +514,14 @@ add_executable(test_file_paths
     src/app/md5_verify.cpp
     src/app/md5_xxh3_cache.cpp
     src/third_party/md5/md5.c
+    src/third_party/xxhash/xxhash.c
+    src/third_party/xxhash/xxhash_dispatch.c
     src/third_party/lz4/lz4.c
 )
 target_include_directories(test_file_paths PRIVATE src)
+if (TARGET brokkr-md5-asm)
+    target_sources(test_file_paths PRIVATE $<TARGET_OBJECTS:brokkr-md5-asm>)
+endif()
 target_compile_definitions(test_file_paths PRIVATE
     $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
     $<TARGET_PROPERTY:brokkr-lib,INTERFACE_COMPILE_DEFINITIONS>
